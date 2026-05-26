@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Linking Roblox to RYLB...</title>
+    <style>
+        body { background: #0A0A0F; color: #F0F0F5; font-family: Inter, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .loader { text-align: center; }
+        .spinner { width: 40px; height: 40px; border: 3px solid rgba(226,35,26,0.2); border-top-color: #E2231A; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .error { color: #F44336; margin-top: 12px; }
+    </style>
+</head>
+<body>
+    <div class="loader">
+        <div class="spinner" id="spinner"></div>
+        <p id="status">Linking your Roblox account...</p>
+        <p class="error" id="error" style="display:none"></p>
+    </div>
+    <script>
+    (function() {
+        var APPROVED_SITES = [
+            "http://localhost",
+            "http://127.0.0.1",
+            "https://raceyourluckyblockweb.pages.dev",
+            "https://raceyourluckyblock.xfrozenstudios.com",
+            "https://raceyourluckyblock.com",
+            "https://www.raceyourluckyblock.xfrozenstudios.com"
+        ];
+
+        var TRADE_API = "https://trade.xfrozenstudios.com";
+
+        var params = new URLSearchParams(window.location.search);
+        var code = params.get("code");
+        var state = params.get("state");
+
+        // Roblox can redirect back with ?error= and ?error_description= when
+        // the authorize step itself rate-limits or the user denies. Show a
+        // friendly message instead of a generic "no code" fallback.
+        var robloxErr = params.get("error");
+        var robloxErrDesc = params.get("error_description");
+        if (robloxErr || robloxErrDesc) {
+            var text = robloxErrDesc || robloxErr;
+            if (/rate.*limit|slow down/i.test(text)) {
+                text = "Roblox is busy right now. Please try again in a minute.";
+            }
+            showError(text);
+            return;
+        }
+        if (!code) {
+            showError("No authorization code received.");
+            return;
+        }
+
+        // Decode return URL, trade token, and Roblox OAuth client_id from state.
+        // client_id is needed so the server knows which OAuth app's secret to
+        // use during the code exchange (we rotate across multiple apps to
+        // dodge Roblox's per-client rate limit).
+        var returnUrl = "";
+        var tradeToken = "";
+        var clientId = "";
+        try {
+            var stateData = JSON.parse(atob(state));
+            returnUrl = stateData.returnUrl || "";
+            tradeToken = stateData.tradeToken || "";
+            clientId = stateData.clientId || "";
+        } catch(e) {
+            returnUrl = "";
+        }
+
+        // Verify return URL
+        var approved = APPROVED_SITES.some(function(site) {
+            return returnUrl && returnUrl.indexOf(site) === 0;
+        });
+        if (!approved) returnUrl = APPROVED_SITES[APPROVED_SITES.length - 1];
+
+        // Exchange Roblox code via trade server
+        fetch(TRADE_API + "/api/trade/auth/roblox", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + tradeToken
+            },
+            body: JSON.stringify({ code: code, client_id: clientId })
+        })
+        .then(function(res) {
+            if (!res.ok) return res.json().then(function(d) { throw new Error(d.error || "Server returned " + res.status); });
+            return res.json();
+        })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.error || "Linking failed");
+
+            // Redirect back with success
+            var baseUrl = returnUrl.split('#')[0];
+            window.location.href = baseUrl + "#/trade-hub?roblox=linked";
+        })
+        .catch(function(err) {
+            showError(err.message || "Something went wrong");
+        });
+
+        function showError(msg) {
+            document.getElementById("spinner").style.display = "none";
+            document.getElementById("status").textContent = "Linking failed";
+            var errorEl = document.getElementById("error");
+            errorEl.textContent = msg;
+            errorEl.style.display = "";
+            setTimeout(function() {
+                if (returnUrl) window.location.href = returnUrl + "#/trade-hub";
+            }, 3000);
+        }
+    })();
+    </script>
+</body>
+</html>
